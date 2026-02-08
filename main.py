@@ -1,5 +1,6 @@
 import os
 import pickle
+from contextlib import asynccontextmanager
 from typing import Optional, List, Dict, Any, Tuple
 
 import numpy as np
@@ -28,16 +29,6 @@ if not TMDB_API_KEY:
 # =========================
 # FASTAPI APP
 # =========================
-app = FastAPI(title="Movie Recommender API", version="3.0")
-
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],  # for local streamlit
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-
 
 # =========================
 # PICKLE GLOBALS
@@ -55,6 +46,65 @@ tfidf_matrix: Any = None
 tfidf_obj: Any = None
 
 TITLE_TO_IDX: Optional[Dict[str, int]] = None
+
+
+# =========================
+# LOAD PICKLES FUNCTION
+# =========================
+def load_pickles():
+    global df, indices_obj, tfidf_matrix, tfidf_obj, TITLE_TO_IDX
+
+    # Load df
+    with open(DF_PATH, "rb") as f:
+        df = pickle.load(f)
+
+    # Load indices
+    with open(INDICES_PATH, "rb") as f:
+        indices_obj = pickle.load(f)
+
+    # Load TF-IDF matrix (usually scipy sparse)
+    with open(TFIDF_MATRIX_PATH, "rb") as f:
+        tfidf_matrix = pickle.load(f)
+
+    # Load tfidf vectorizer (optional, not used directly here)
+    with open(TFIDF_PATH, "rb") as f:
+        tfidf_obj = pickle.load(f)
+
+    # Build normalized map
+    TITLE_TO_IDX = build_title_to_idx_map(indices_obj)
+
+    # sanity
+    if df is None or "title" not in df.columns:
+        raise RuntimeError("df.pkl must contain a DataFrame with a 'title' column")
+
+
+# =========================
+# STARTUP LOGIC
+# =========================
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    load_pickles()
+    yield
+    # Shutdown (if needed)
+
+
+# =========================
+# CREATE APP WITH LIFESPAN
+# =========================
+app = FastAPI(
+    title="Movie Recommender API",
+    version="3.0",
+    lifespan=lifespan
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],  # for local streamlit
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 
 # =========================
@@ -275,37 +325,6 @@ async def attach_tmdb_card_by_title(title: str) -> Optional[TMDBMovieCard]:
         )
     except Exception:
         return None
-
-
-# =========================
-# STARTUP: LOAD PICKLES
-# =========================
-@app.on_event("startup")
-def load_pickles():
-    global df, indices_obj, tfidf_matrix, tfidf_obj, TITLE_TO_IDX
-
-    # Load df
-    with open(DF_PATH, "rb") as f:
-        df = pickle.load(f)
-
-    # Load indices
-    with open(INDICES_PATH, "rb") as f:
-        indices_obj = pickle.load(f)
-
-    # Load TF-IDF matrix (usually scipy sparse)
-    with open(TFIDF_MATRIX_PATH, "rb") as f:
-        tfidf_matrix = pickle.load(f)
-
-    # Load tfidf vectorizer (optional, not used directly here)
-    with open(TFIDF_PATH, "rb") as f:
-        tfidf_obj = pickle.load(f)
-
-    # Build normalized map
-    TITLE_TO_IDX = build_title_to_idx_map(indices_obj)
-
-    # sanity
-    if df is None or "title" not in df.columns:
-        raise RuntimeError("df.pkl must contain a DataFrame with a 'title' column")
 
 
 # =========================
